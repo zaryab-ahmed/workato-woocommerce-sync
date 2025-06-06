@@ -1,0 +1,15 @@
+# .workato/connections.yml
+connections:
+  - name: woocommerce
+    label: WooCommerce HTTP
+    # Type “http” tells Workato to use the generic HTTP connector
+    type: http
+    authorization:
+      type: basic
+      username: "{{environment.WOO_CLIENT_KEY}}"
+      password: "{{environment.WOO_CLIENT_SECRET}}"
+    # Base URL of your WooCommerce store
+    base_url: "{{environment.WOO_STORE_URL}}/wp-json/wc/v3"
+    # Default headers
+    headers:
+      Content-Type: application/json

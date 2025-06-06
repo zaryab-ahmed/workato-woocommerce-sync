@@ -1,0 +1,70 @@
+# .github/workflows/deploy.yml
+name: "Deploy to Workato"
+
+on:
+  push:
+    branches:
+      - develop    # triggers a dev deploy
+      - main       # triggers a prod deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install Workato CLI
+        run: npm install -g workato
+
+      - name: Configure Workato CLI (login)
+        env:
+          WORKATO_CLI_TOKEN_DEV: ${{ secrets.WORKATO_CLI_TOKEN_DEV }}
+          WORKATO_CLI_TOKEN_PROD: ${{ secrets.WORKATO_CLI_TOKEN_PROD }}
+        run: |
+          # Login to dev or prod based on branch
+          if [ "${{ github.ref_name }}" == "develop" ]; then
+            workato login --token $WORKATO_CLI_TOKEN_DEV --profile dev
+          else
+            workato login --token $WORKATO_CLI_TOKEN_PROD --profile prod
+          fi
+
+      - name: Inject Environment Variables (Woo credentials)
+        if: github.ref_name == 'develop'
+        run: |
+          mkdir -p .workato/environments
+          cat <<EOF > .workato/environments/dev.env.yml
+          environment:
+            WOO_STORE_URL: "${{ secrets.DEV_WOO_STORE_URL }}"
+            WOO_CLIENT_KEY: "${{ secrets.DEV_WOO_CLIENT_KEY }}"
+            WOO_CLIENT_SECRET: "${{ secrets.DEV_WOO_CLIENT_SECRET }}"
+            MIDDLEWARE_URL: "${{ secrets.DEV_MIDDLEWARE_URL }}"
+            IS_PROD: "false"
+          EOF
+
+      - name: Inject Environment Variables (Prod)
+        if: github.ref_name == 'main'
+        run: |
+          mkdir -p .workato/environments
+          cat <<EOF > .workato/environments/prod.env.yml
+          environment:
+            WOO_STORE_URL: "${{ secrets.PROD_WOO_STORE_URL }}"
+            WOO_CLIENT_KEY: "${{ secrets.PROD_WOO_CLIENT_KEY }}"
+            WOO_CLIENT_SECRET: "${{ secrets.PROD_WOO_CLIENT_SECRET }}"
+            MIDDLEWARE_URL: "${{ secrets.PROD_MIDDLEWARE_URL }}"
+            IS_PROD: "true"
+          EOF
+
+      - name: Deploy to Workato
+        run: |
+          if [ "${{ github.ref_name }}" == "develop" ]; then
+            workato deploy -s dev
+          else
+            workato deploy -s prod
+          fi

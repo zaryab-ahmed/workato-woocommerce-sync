@@ -1,0 +1,113 @@
+# .workato/recipes/order_price_sync.yml
+recipe:
+  name: "WooCommerce Order & Price Sync"
+  # A short label you’ll see in Workato’s UI
+
+  # 1) Trigger: scheduler
+  trigger:
+    type: scheduler
+    # Dev: every 5 minutes; Prod: every 15 minutes (overridden via environment if desired)
+    cron: "{{if environment.IS_PROD == 'true' then '*/15 * * * *' else '*/5 * * * *'}}"
+    # Note: Workato supports literal cron expressions. Here we check env.IS_PROD
+
+  actions:
+    # ─────────────────────────────────────────────────────────────────
+    # ▷ STEP 1: Fetch recent orders (last 24 hours)
+    - label: "Fetch recent orders from WooCommerce"
+      type: http
+      # Use the "woocommerce" connector defined in connections.yml
+      connector: woocommerce
+      input:
+        verb: GET
+        # “orders?after=<ISO8601>” – will fetch orders created after that timestamp
+        url: "/orders"
+        # Build query params
+        query:
+          per_page: 100
+          after: "{{(now - 24 * 60 * 60 * 1000).iso8601}}"
+      # Save the response in the job data so we can iterate
+      output_field: orders_list
+
+    # ─────────────────────────────────────────────────────────────────
+    # ▷ STEP 2: Loop through each order in orders_list
+    - label: "Process each order"
+      type: loop
+      input:
+        list: "{{orders_list}}"
+      actions:
+        # Extract the current looped “order”
+        - type: set_variable
+          name: current_order
+          value: "{{loop_item}}"
+
+        # ▷ 2a) Send order data to your own Node/TS middleware or any HTTP endpoint
+        - label: "Push order to custom middleware"
+          type: http
+          input:
+            verb: POST
+            # Either point to your middleware’s public URL or an ngrok URL during dev.
+            # For example: "https://abc123.ngrok.io/orders"
+            url: "{{environment.MIDDLEWARE_URL}}/orders"
+            headers:
+              Content-Type: "application/json"
+            body:
+              order_id: "{{current_order.id}}"
+              total:    "{{current_order.total}}"
+              currency: "{{current_order.currency}}"
+              line_items: "{{current_order.line_items}}"
+
+        # ▷ 2b) (Optional) Example: If you want to update the same order’s meta in WooCommerce
+        #            e.g. set a “synced” flag. Comment this out if you don’t need it.
+        - label: "Flag order as synced in WooCommerce"
+          type: http
+          input:
+            verb: PUT
+            url: "/orders/{{current_order.id}}"
+            headers:
+              Content-Type: "application/json"
+            body:
+              meta_data:
+                - key: synced_by_workato
+                  value: true
+
+    # ─────────────────────────────────────────────────────────────────
+    # ▷ STEP 3: Fetch a list of products to update their prices (e.g. apply a 5% discount)
+    - label: "Fetch all products (first 100)"
+      type: http
+      connector: woocommerce
+      input:
+        verb: GET
+        url: "/products"
+        query:
+          per_page: 100
+      output_field: products_list
+
+    # ▷ STEP 4: Loop through each product and (for demo) reduce price by 5%
+    - label: "Loop through products to adjust price"
+      type: loop
+      input:
+        list: "{{products_list}}"
+      actions:
+        - type: set_variable
+          name: current_product
+          value: "{{loop_item}}"
+
+        # Calculate 5% discount – Workato formula syntax
+        - type: set_variable
+          name: discounted_price
+          value: "{{(current_product.regular_price.to_f * 0.95).round(2).to_s}}"
+
+        # Use HTTP connector to update that product’s regular_price
+        - label: "Update product price in WooCommerce"
+          type: http
+          connector: woocommerce
+          input:
+            verb: PUT
+            url: "/products/{{current_product.id}}"
+            headers:
+              Content-Type: "application/json"
+            body:
+              regular_price: "{{discounted_price}}"
+
+    # ─────────────────────────────────────────────────────────────────
+    # ▷ STEP 5: End of recipe

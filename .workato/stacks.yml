@@ -1,0 +1,15 @@
+# .workato/stacks.yml
+stacks:
+  - name: dev
+    label: "Dev Workspace"
+    connectors:
+      - woocommerce
+    recipes:
+      - order_price_sync
+
+  - name: prod
+    label: "Prod Workspace"
+    connectors:
+      - woocommerce
+    recipes:
+      - order_price_sync
